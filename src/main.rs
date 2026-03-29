@@ -29,19 +29,18 @@ fn main() -> Result<()> {
         }
         Commands::Start { port, save, cmd } => {
             let mut overwritten = false;
-            let bind = format!("0.0.0.0:{}", port);
 
             if let Some(run_cmd) = save.then_some(cmd).flatten() {
                 let proxy = match run_cmd {
                     RunCommands::Socks5 { username, password } => ProxyConfig {
                         protocol: "socks5".to_string(),
-                        bind: bind.clone(),
+                        port,
                         username,
                         password,
                     },
                     RunCommands::Http => ProxyConfig {
                         protocol: "http".to_string(),
-                        bind: bind.clone(),
+                        port,
                         username: None,
                         password: None,
                     },
@@ -51,8 +50,8 @@ fn main() -> Result<()> {
                     Some(old) => {
                         config.save()?;
                         println!(
-                            "Proxy {} {} (User: {}, Pass: {}) → (User: {}, Pass: {})",
-                            proxy.bind.green(),
+                            "Proxy on port {} {} (User: {}, Pass: {}) → (User: {}, Pass: {})",
+                            proxy.port.to_string().green(),
                             "overwritten:".yellow(),
                             old.username.unwrap_or_else(|| "-".to_string()),
                             old.password.unwrap_or_else(|| "-".to_string()),
@@ -63,7 +62,7 @@ fn main() -> Result<()> {
                     }
                     None => {
                         config.save()?;
-                        println!("Proxy {} added to config.", proxy.bind.green());
+                        println!("Proxy on port {} added to config.", proxy.port.to_string().green());
                     }
                 }
             }
@@ -139,9 +138,10 @@ fn main() -> Result<()> {
                 let rows: Vec<Row> = rt.block_on(async {
                     let mut res = Vec::new();
                     for proxy in config.proxies {
+                        let bind = format!("0.0.0.0:{}", proxy.port);
                         let status_raw = match tokio::time::timeout(
                             std::time::Duration::from_millis(200),
-                            tokio::net::TcpStream::connect(&proxy.bind),
+                            tokio::net::TcpStream::connect(&bind),
                         )
                         .await
                         {
@@ -155,7 +155,6 @@ fn main() -> Result<()> {
                             status_raw.red()
                         };
 
-                        let port = proxy.bind.split(':').next_back().unwrap_or(&proxy.bind);
                         let protocol_prefix = if proxy.protocol == "socks5" {
                             "socks5h"
                         } else {
@@ -164,14 +163,14 @@ fn main() -> Result<()> {
 
                         let url = match (&proxy.username, &proxy.password) {
                             (Some(u), Some(p)) => {
-                                format!("{}://{}:{}@{}:{}", protocol_prefix, u, p, public_ip, port)
+                                format!("{}://{}:{}@{}:{}", protocol_prefix, u, p, public_ip, proxy.port)
                             }
-                            _ => format!("{}://{}:{}", protocol_prefix, public_ip, port),
+                            _ => format!("{}://{}:{}", protocol_prefix, public_ip, proxy.port),
                         };
 
                         res.push(Row {
                             protocol: proxy.protocol,
-                            bind: proxy.bind,
+                            bind,
                             status,
                             user: proxy.username.unwrap_or_else(|| "-".to_string()),
                             pass: proxy.password.unwrap_or_else(|| "-".to_string()),
@@ -280,18 +279,17 @@ fn get_proxies_to_run(
     save: bool,
     cmd: Option<RunCommands>,
 ) -> Result<Vec<ProxyConfig>> {
-    let bind = format!("0.0.0.0:{}", port);
     if let Some(run_cmd) = cmd {
         let proxy = match run_cmd {
             RunCommands::Socks5 { username, password } => ProxyConfig {
                 protocol: "socks5".to_string(),
-                bind: bind.clone(),
+                port,
                 username,
                 password,
             },
             RunCommands::Http => ProxyConfig {
                 protocol: "http".to_string(),
-                bind: bind.clone(),
+                port,
                 username: None,
                 password: None,
             },
@@ -302,8 +300,8 @@ fn get_proxies_to_run(
                 Some(old) => {
                     config.save()?;
                     println!(
-                        "Proxy {} {} (User: {}, Pass: {}) → (User: {}, Pass: {})",
-                        proxy.bind.green(),
+                        "Proxy on port {} {} (User: {}, Pass: {}) → (User: {}, Pass: {})",
+                        proxy.port.to_string().green(),
                         "overwritten:".yellow(),
                         old.username.unwrap_or_else(|| "-".to_string()),
                         old.password.unwrap_or_else(|| "-".to_string()),
@@ -313,7 +311,7 @@ fn get_proxies_to_run(
                 }
                 None => {
                     config.save()?;
-                    println!("Proxy {} added to config.", proxy.bind.green());
+                    println!("Proxy on port {} added to config.", proxy.port.to_string().green());
                 }
             }
         }
@@ -333,11 +331,12 @@ fn get_proxies_to_run(
 async fn run_proxies(proxies: Vec<ProxyConfig>) -> Result<()> {
     let mut handles = vec![];
     for proxy in proxies {
+        let bind = format!("0.0.0.0:{}", proxy.port);
         match proxy.protocol.as_str() {
             "socks5" => {
                 let h = tokio::spawn(async move {
-                    if let Err(e) = socks5::run(&proxy.bind, proxy.username, proxy.password).await {
-                        eprintln!("SOCKS5 server error on {}: {}", proxy.bind.red(), e);
+                    if let Err(e) = socks5::run(&bind, proxy.username, proxy.password).await {
+                        eprintln!("SOCKS5 server error on {}: {}", bind.red(), e);
                     }
                 });
                 handles.push(h);

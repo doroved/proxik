@@ -118,7 +118,13 @@ Proxies are stored in `~/.proxik/config.toml`.
 ```toml
 [[proxies]]
 protocol = "socks5"
-bind = "0.0.0.0:1080"
+port = 1080
+username = "admin"
+password = "password123"
+
+[[proxies]]
+protocol = "http"
+port = 8080
 username = "admin"
 password = "password123"
 ```

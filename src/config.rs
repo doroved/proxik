@@ -6,7 +6,7 @@ use std::path::PathBuf;
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ProxyConfig {
     pub protocol: String,
-    pub bind: String,
+    pub port: u16,
     pub username: Option<String>,
     pub password: Option<String>,
 }
@@ -51,10 +51,10 @@ impl Config {
         Ok(())
     }
 
-    /// Adds a proxy or overwrites an existing one with the same bind address.
+    /// Adds a proxy or overwrites an existing one with the same port.
     /// Returns the old config if it was overwritten.
     pub fn add_proxy(&mut self, proxy: ProxyConfig) -> Option<ProxyConfig> {
-        if let Some(index) = self.proxies.iter().position(|p| p.bind == proxy.bind) {
+        if let Some(index) = self.proxies.iter().position(|p| p.port == proxy.port) {
             let old = self.proxies[index].clone();
             self.proxies[index] = proxy;
             Some(old)
