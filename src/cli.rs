@@ -31,6 +31,8 @@ pub enum Commands {
     Stop,
     /// Show the server daemon log
     Log,
+    /// List configured proxies
+    List,
     /// Update the application
     Update,
 }

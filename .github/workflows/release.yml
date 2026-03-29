@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build for ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Cross
+        run: cargo install cross --git https://github.com/cross-rs/cross.git
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build binary
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Extract version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - name: Compress binary with UPX
+        run: |
+          wget https://github.com/upx/upx/releases/download/v5.1.1/upx-5.1.1-amd64_linux.tar.xz
+          tar -xvf upx-5.1.1-amd64_linux.tar.xz
+          sudo mv upx-5.1.1-amd64_linux/upx /usr/local/bin/upx
+          upx target/${{ matrix.target }}/release/proxik
+
+      - name: Package archive
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/proxik staging/
+          cd staging
+          tar -czvf ../proxik-${{ env.VERSION }}-${{ matrix.target }}.tar.gz proxik
+          cd ..
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: proxik-${{ env.VERSION }}-${{ matrix.target }}.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: false

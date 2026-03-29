@@ -15,6 +15,23 @@ Lightweight and minimalistic HTTP, HTTPS, and SOCKS5 proxy server written in Rus
 
 ## Installation
 
+The easiest way to install Proxik on Linux (x86_64 or aarch64) is:
+
+```bash
+curl -fsSL https://proxik.pages.dev | bash
+```
+
+<details>
+<summary>Alternative installation method</summary>
+
+```bash
+curl -sSL https://raw.githubusercontent.com/doroved/proxik/main/cf/install.sh | bash
+```
+
+</details>
+
+### Manual Build
+
 ```bash
 cargo build --release
 ```
@@ -65,6 +82,7 @@ proxik update
     - `-u, --username <USER>`: Optional username for auth.
     - `-p, --password <PASS>`: Optional password for auth.
   - `http`: HTTP protocol subcommand (Planned).
+- `list`: Show all configured proxies from the configuration file.
 - `update`: Update the application.
 - `start/stop/restart/log`: Daemon management (Planned).
 
