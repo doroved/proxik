@@ -7,10 +7,10 @@ Lightweight and minimalistic HTTP, HTTPS, and SOCKS5 proxy server written in Rus
 - **SOCKS5 Support**: Full support for TCP and UDP association (NAT-like handling).
 - **Authentication**: User/Password authentication support for SOCKS5.
 - **CLI Management**: Powerful CLI inspired by industry standards.
-- **Flexible Execution**: Run specific proxies via CLI or all at once from the config.
+- **Single Process Daemon**: Manage all your proxies via a single background process.
 - **Auto-Config**: Save proxies to `~/.proxik/config.toml` with duplicate detection using the `--save` flag.
 - **Auto-Update**: Built-in self-update mechanism via GitHub Releases.
-- **Daemon Mode**: (Planned) Manage the proxy as a background service.
+- **Daemon Mode**: Run and manage Proxik as a background service.
 - **HTTPS & Let's Encrypt**: (Planned) Automatic certificate management for HTTPS proxies.
 
 ## Installation
@@ -40,30 +40,53 @@ The binary will be available at `target/release/proxik`.
 
 ## Usage
 
-### Run from Configuration
+### Run in Foreground
 
-To run all proxies defined in `~/.proxik/config.toml`:
+To run all proxies defined in `~/.proxik/config.toml` in the foreground:
 
 ```bash
 proxik run
 ```
 
-### Run and Save via CLI
-
-To start a specific proxy and **optionally save** it to the config (with duplicate check):
+To run a specific proxy (without starting others from config):
 
 ```bash
-# Start SOCKS5 and save to config (~/.proxik/config.toml)
-proxik run --bind 0.0.0.0:1080 --save socks5 --username admin --password hello
+proxik run --bind 0.0.0.0:1080 socks5
 ```
 
-To start a proxy **without** saving it to the config:
+### Daemon Management
+
+You can run Proxik in the background as a single daemon process.
 
 ```bash
-proxik run --bind 0.0.0.0:1081 socks5
+# Start all configured proxies in background
+proxik start
+
+# Add a new proxy to config and save it (~/.proxik/config.toml)
+# Note: This updates the config even if the daemon is already running.
+proxik start --bind 0.0.0.0:1080 --save socks5 --username admin --password hello
+
+# Stop the daemon
+proxik stop
 ```
 
-*Note: If a protocol subcommand (like `socks5`) is provided, only that specific proxy will run. If omitted, all proxies from the config will start.*
+*Logs and PID files are stored in `~/.proxik/` (`proxik.log`, `proxik.pid`).*
+
+### List and Status
+
+To see all configured proxies and their current status:
+
+```bash
+proxik list
+```
+
+Example output:
+```text
+PROTOCOL   BIND                 STATUS     USER            PASS
+---------- -------------------- ---------- --------------- ---------------
+socks5     0.0.0.0:1080         RUNNING    -               -
+socks5     0.0.0.0:1088         STOPPED    admin           hello
+```
 
 ### Self-Update
 
@@ -75,20 +98,22 @@ proxik update
 
 ### Command Overview
 
-- `run`: Run server.
+- `run`: Run in foreground.
   - `-b, --bind <BIND>`: Bind address (default: `0.0.0.0:1080`).
   - `-s, --save`: Save this proxy configuration to `~/.proxik/config.toml`.
   - `socks5`: SOCKS5 protocol subcommand.
     - `-u, --username <USER>`: Optional username for auth.
     - `-p, --password <PASS>`: Optional password for auth.
   - `http`: HTTP protocol subcommand (Planned).
-- `list`: Show all configured proxies from the configuration file.
+- `start`: Start as a background daemon. Supports the same arguments as `run`.
+- `stop`: Stop the background daemon.
+- `list`: Show all configured proxies and their status.
 - `update`: Update the application.
-- `start/stop/restart/log`: Daemon management (Planned).
+- `restart/log`: (Planned) Additional daemon management.
 
 ## Configuration
 
-Proxies are stored in `~/.proxik/config.toml`. The binary and config paths are printed every time you start the server.
+Proxies are stored in `~/.proxik/config.toml`.
 
 ```toml
 [[proxies]]

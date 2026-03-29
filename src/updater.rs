@@ -16,12 +16,7 @@ struct Asset {
     url: String,
 }
 
-pub fn update() -> Result<()> {
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-    rt.block_on(run_update_async())
-}
-
-async fn run_update_async() -> Result<()> {
+pub async fn update() -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");
 
@@ -53,8 +48,16 @@ async fn run_update_async() -> Result<()> {
 
     println!("New version found: v{}. Downloading...", latest_tag);
 
-    // Find the correct asset for Linux x64 (musl)
-    let expected_asset_name = format!("{}-{}-x86_64-unknown-linux-musl.tar.gz", name, latest_tag);
+    // Detect architecture
+    let arch = std::env::consts::ARCH;
+    let target = match arch {
+        "x86_64" => "x86_64-unknown-linux-musl",
+        "aarch64" => "aarch64-unknown-linux-musl",
+        _ => return Err(anyhow::anyhow!("Unsupported architecture: {}", arch)),
+    };
+
+    // Find the correct asset for current architecture
+    let expected_asset_name = format!("{}-{}-{}.tar.gz", name, latest_tag, target);
     let asset = release
         .assets
         .iter()

@@ -13,6 +13,7 @@ pub struct ProxyConfig {
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct Config {
+    pub public_ip: Option<String>,
     pub proxies: Vec<ProxyConfig>,
 }
 
@@ -50,13 +51,16 @@ impl Config {
         Ok(())
     }
 
-    /// Returns true if proxy was added, false if it was already there (based on bind address)
-    pub fn add_proxy(&mut self, proxy: ProxyConfig) -> bool {
-        if !self.proxies.iter().any(|p| p.bind == proxy.bind) {
-            self.proxies.push(proxy);
-            true
+    /// Adds a proxy or overwrites an existing one with the same bind address.
+    /// Returns the old config if it was overwritten.
+    pub fn add_proxy(&mut self, proxy: ProxyConfig) -> Option<ProxyConfig> {
+        if let Some(index) = self.proxies.iter().position(|p| p.bind == proxy.bind) {
+            let old = self.proxies[index].clone();
+            self.proxies[index] = proxy;
+            Some(old)
         } else {
-            false
+            self.proxies.push(proxy);
+            None
         }
     }
 }

@@ -24,7 +24,18 @@ pub enum Commands {
         cmd: Option<RunCommands>,
     },
     /// Start server daemon
-    Start,
+    Start {
+        /// Bind address
+        #[arg(short, long, default_value = "0.0.0.0:1080")]
+        bind: String,
+
+        /// Save proxy to configuration file
+        #[arg(short, long)]
+        save: bool,
+
+        #[command(subcommand)]
+        cmd: Option<RunCommands>,
+    },
     /// Restart server daemon
     Restart,
     /// Stop server daemon
@@ -37,7 +48,7 @@ pub enum Commands {
     Update,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum RunCommands {
     /// Http server
     Http,
