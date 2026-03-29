@@ -56,14 +56,16 @@ impl Handler for CommandHandler {
                 stream.write_response_unspecified().await?;
 
                 let mut target = TcpStream::connect(addr.to_string()).await?;
+                let start = Instant::now();
                 let copy = io::copy_bidirectional(stream, &mut target).await?;
 
                 println!(
-                    "[TCP] {} → {} | Sent: {}, Received: {}",
+                    "[TCP] {} → {} | Sent: {}, Received: {} | Duration: {:.2?}",
                     stream.peer_addr(),
                     addr,
-                    copy.0,
-                    copy.1
+                    format_bytes(copy.0),
+                    format_bytes(copy.1),
+                    start.elapsed()
                 );
             }
             Request::Associate(_) => {
@@ -84,9 +86,14 @@ impl Handler for CommandHandler {
                     bind_addr
                 );
 
+                let start = Instant::now();
                 udp_session_run(inbound, Duration::from_secs(180)).await?;
 
-                println!("[UDP] Association for {} ended.", stream.peer_addr());
+                println!(
+                    "[UDP] Association for {} ended | Duration: {:.2?}",
+                    stream.peer_addr(),
+                    start.elapsed()
+                );
             }
             _ => {
                 stream.write_response_unsupported().await?;
@@ -303,4 +310,20 @@ async fn handle_client_packet(
     }
 
     Ok(())
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = KIB * 1024;
+    const GIB: u64 = MIB * 1024;
+
+    if bytes >= GIB {
+        format!("{:.2} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.2} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.2} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
 }
