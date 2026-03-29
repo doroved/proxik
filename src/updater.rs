@@ -20,7 +20,7 @@ pub async fn update() -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");
 
-    println!("Checking for updates (current version: v{})...", version);
+    tracing::info!("Checking for updates (current version: v{})...", version);
 
     let client = reqwest::Client::builder()
         .user_agent(format!("{}-updater", name))
@@ -42,11 +42,11 @@ pub async fn update() -> Result<()> {
 
     // Manual version comparison (semantic versioning: major.minor.patch)
     if !is_newer(latest_tag, version) {
-        println!("You are already using the latest version (v{}).", version);
+        tracing::info!("You are already using the latest version (v{}).", version);
         return Ok(());
     }
 
-    println!("New version found: v{}. Downloading...", latest_tag);
+    tracing::info!("New version found: v{}. Downloading...", latest_tag);
 
     // Detect architecture
     let arch = std::env::consts::ARCH;
@@ -77,7 +77,7 @@ pub async fn update() -> Result<()> {
 
     let content = response.bytes().await?;
 
-    println!("Unpacking using system tar...");
+    tracing::info!("Unpacking using system tar...");
     let temp_dir = std::env::temp_dir().join(format!("{}_update_dir", name));
     let archive_path = std::env::temp_dir().join(format!("{}_update.tar.gz", name));
 
@@ -119,10 +119,10 @@ pub async fn update() -> Result<()> {
 
     let target_path = format!("/usr/local/bin/{}", name);
 
-    println!("Stopping daemon...");
+    tracing::info!("Stopping daemon...");
     let _ = Command::new(&target_path).arg("stop").output();
 
-    println!("Installing new binary to {}...", target_path);
+    tracing::info!("Installing new binary to {}...", target_path);
 
     // To bypass "Text file busy" (OS error 26), we use fs::rename instead of fs::copy.
     if fs::rename(&new_binary, &target_path).is_err() {
@@ -140,10 +140,10 @@ pub async fn update() -> Result<()> {
         fs::set_permissions(&target_path, perms)?;
     }
 
-    println!("Starting daemon...");
+    tracing::info!("Starting daemon...");
     let _ = Command::new(&target_path).arg("start").spawn()?;
 
-    println!("Successfully updated to v{}!", latest_tag);
+    tracing::info!("Successfully updated to v{}!", latest_tag);
 
     // Clean up
     let _ = fs::remove_dir_all(&temp_dir);

@@ -1,17 +1,25 @@
 mod cli;
 mod config;
 mod daemon;
+mod http;
 mod socks5;
 mod updater;
+pub mod utils;
 
 use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Commands, RunCommands};
+use colored::*;
 use config::{Config, ProxyConfig};
 
-use colored::*;
-
 fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .with_ansi(true)
+        .with_ansi_sanitization(false)
+        .init();
+
     let cli = Cli::parse();
     let mut config = Config::load()?;
 
@@ -49,10 +57,10 @@ fn main() -> Result<()> {
                 match config.add_proxy(proxy.clone()) {
                     Some(old) => {
                         config.save()?;
-                        println!(
+                        tracing::info!(
                             "Proxy on port {} {} (User: {}, Pass: {}) → (User: {}, Pass: {})",
-                            proxy.port.to_string().green(),
-                            "overwritten:".yellow(),
+                            proxy.port,
+                            "overwritten:",
                             old.username.unwrap_or_else(|| "-".to_string()),
                             old.password.unwrap_or_else(|| "-".to_string()),
                             proxy.username.clone().unwrap_or_else(|| "-".to_string()),
@@ -62,19 +70,19 @@ fn main() -> Result<()> {
                     }
                     None => {
                         config.save()?;
-                        println!("Proxy on port {} added to config.", proxy.port.to_string().green());
+                        tracing::info!("Proxy on port {} added to config.", proxy.port);
                     }
                 }
             }
 
             if daemon::is_running() {
                 if overwritten {
-                    println!("{}", "Restarting Proxik daemon to apply changes...".cyan());
+                    tracing::info!("Restarting Proxik daemon to apply changes...");
                     daemon::stop_daemon()?;
                     std::thread::sleep(std::time::Duration::from_millis(500));
                 } else {
-                    println!("{}", "Proxik daemon is already running.".yellow());
-                    println!(
+                    tracing::info!("Proxik daemon is already running.");
+                    tracing::info!(
                         "To apply new config, please restart the daemon: stop then start or use 'restart'."
                     );
                     return Ok(());
@@ -83,7 +91,7 @@ fn main() -> Result<()> {
 
             let proxies_to_run = config.proxies.clone();
             if proxies_to_run.is_empty() {
-                println!("No proxies configured. Use '--save' to add one.");
+                tracing::warn!("No proxies configured. Use '--save' to add one.");
                 return Ok(());
             }
 
@@ -94,16 +102,16 @@ fn main() -> Result<()> {
         }
         Commands::Restart => {
             if !daemon::is_running() {
-                println!("{}", "Proxik is not running. Starting it...".cyan());
+                tracing::info!("Proxik is not running. Starting it...");
             } else {
-                println!("{}", "Restarting Proxik daemon...".cyan());
+                tracing::info!("Restarting Proxik daemon...");
                 daemon::stop_daemon()?;
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
 
             let proxies_to_run = config.proxies.clone();
             if proxies_to_run.is_empty() {
-                println!("No proxies configured in ~/.proxik/config.toml");
+                tracing::warn!("No proxies configured in ~/.proxik/config.toml");
                 return Ok(());
             }
 
@@ -163,7 +171,10 @@ fn main() -> Result<()> {
 
                         let url = match (&proxy.username, &proxy.password) {
                             (Some(u), Some(p)) => {
-                                format!("{}://{}:{}@{}:{}", protocol_prefix, u, p, public_ip, proxy.port)
+                                format!(
+                                    "{}://{}:{}@{}:{}",
+                                    protocol_prefix, u, p, public_ip, proxy.port
+                                )
                             }
                             _ => format!("{}://{}:{}", protocol_prefix, public_ip, proxy.port),
                         };
@@ -248,7 +259,7 @@ fn main() -> Result<()> {
             }
         }
         _ => {
-            println!("Command not fully implemented yet.");
+            tracing::warn!("Command not fully implemented yet.");
         }
     }
 
@@ -299,10 +310,10 @@ fn get_proxies_to_run(
             match config.add_proxy(proxy.clone()) {
                 Some(old) => {
                     config.save()?;
-                    println!(
+                    tracing::info!(
                         "Proxy on port {} {} (User: {}, Pass: {}) → (User: {}, Pass: {})",
-                        proxy.port.to_string().green(),
-                        "overwritten:".yellow(),
+                        proxy.port,
+                        "overwritten:",
                         old.username.unwrap_or_else(|| "-".to_string()),
                         old.password.unwrap_or_else(|| "-".to_string()),
                         proxy.username.clone().unwrap_or_else(|| "-".to_string()),
@@ -311,7 +322,7 @@ fn get_proxies_to_run(
                 }
                 None => {
                     config.save()?;
-                    println!("Proxy on port {} added to config.", proxy.port.to_string().green());
+                    tracing::info!("Proxy on port {} added to config.", proxy.port);
                 }
             }
         }
@@ -319,7 +330,7 @@ fn get_proxies_to_run(
         Ok(vec![proxy])
     } else {
         if config.proxies.is_empty() {
-            println!(
+            tracing::warn!(
                 "No proxies configured. Use 'run --save <PROTOCOL>' to add one or check ~/.proxik/config.toml"
             );
             return Ok(vec![]);
@@ -336,16 +347,21 @@ async fn run_proxies(proxies: Vec<ProxyConfig>) -> Result<()> {
             "socks5" => {
                 let h = tokio::spawn(async move {
                     if let Err(e) = socks5::run(&bind, proxy.username, proxy.password).await {
-                        eprintln!("SOCKS5 server error on {}: {}", bind.red(), e);
+                        tracing::error!("SOCKS5 server error on {}: {}", bind, e);
                     }
                 });
                 handles.push(h);
             }
             "http" => {
-                println!("HTTP protocol is not yet implemented");
+                let h = tokio::spawn(async move {
+                    if let Err(e) = http::run(&bind, proxy.username, proxy.password).await {
+                        tracing::error!("HTTP server error on {}: {}", bind, e);
+                    }
+                });
+                handles.push(h);
             }
             _ => {
-                println!("Protocol {} is not supported", proxy.protocol);
+                tracing::warn!("Protocol {} is not supported", proxy.protocol);
             }
         }
     }

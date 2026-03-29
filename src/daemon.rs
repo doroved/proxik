@@ -37,9 +37,9 @@ pub fn start_daemon() -> Result<()> {
     let stdout_log = base_dir.join("proxik.log");
     let stderr_log = base_dir.join("proxik.err");
 
-    println!("Starting Proxik daemon...");
-    println!("PID file: {:?}", pid_file);
-    println!("Log file: {:?}", stdout_log);
+    tracing::info!("Starting Proxik daemon...");
+    tracing::info!("PID file: {:?}", pid_file);
+    tracing::info!("Log file: {:?}", stdout_log);
 
     let stdout = File::create(&stdout_log).context("Failed to create stdout log file")?;
     let stderr = File::create(&stderr_log).context("Failed to create stderr log file")?;
@@ -61,7 +61,7 @@ pub fn stop_daemon() -> Result<()> {
     let pid_path = base_dir.join("proxik.pid");
 
     if !pid_path.exists() {
-        println!("Proxik is not running (no PID file).");
+        tracing::info!("Proxik is not running (no PID file).");
         return Ok(());
     }
 
@@ -70,7 +70,7 @@ pub fn stop_daemon() -> Result<()> {
         .and_then(|c| c.trim().parse::<i32>().ok());
 
     if let Some(pid) = pid {
-        println!("Stopping Proxik daemon (PID {})...", pid);
+        tracing::info!("Stopping Proxik daemon (PID {})...", pid);
 
         let status = Command::new("kill")
             .arg("-15")
@@ -80,10 +80,12 @@ pub fn stop_daemon() -> Result<()> {
         match status {
             Ok(s) if s.success() => {
                 let _ = std::fs::remove_file(&pid_path);
-                println!("Daemon stopped successfully.");
+                tracing::info!("Daemon stopped successfully.");
             }
             _ => {
-                println!("Failed to stop process or process already dead. Cleaning up PID file.");
+                tracing::warn!(
+                    "Failed to stop process or process already dead. Cleaning up PID file."
+                );
                 let _ = std::fs::remove_file(&pid_path);
             }
         }

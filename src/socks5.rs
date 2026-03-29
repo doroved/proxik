@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use colored::*;
 use socks_lib::io::{self, AsyncRead, AsyncWrite};
 use socks_lib::net::{TcpListener, TcpStream, UdpSocket};
 use socks_lib::v5::server::auth::{NoAuthentication, UserPassword};
@@ -15,16 +14,18 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
 
+use crate::utils::format_bytes;
+
 pub async fn run(
     bind_addr: &str,
     username: Option<String>,
     password: Option<String>,
 ) -> Result<()> {
     let listener = TcpListener::bind(bind_addr).await?;
-    println!(
+    tracing::info!(
         "{} server listening on {}",
-        "SOCKS5".blue().bold(),
-        listener.local_addr()?.to_string().green()
+        "SOCKS5",
+        listener.local_addr()?.to_string()
     );
 
     let shutdown = async {
@@ -58,11 +59,11 @@ impl Handler for CommandHandler {
     {
         match request {
             Request::Connect(addr) => {
-                println!(
+                tracing::info!(
                     "{} {} → connecting to {}",
-                    "[TCP]".blue().bold(),
+                    "[TCP]",
                     stream.peer_addr(),
-                    addr.to_string().cyan()
+                    addr.to_string()
                 );
                 stream.write_response_unspecified().await?;
 
@@ -93,14 +94,14 @@ impl Handler for CommandHandler {
                 let start = Instant::now();
                 let copy = io::copy_bidirectional(stream, &mut target).await?;
 
-                println!(
+                tracing::info!(
                     "{} {} → {} | Sent: {}, Received: {} | Duration: {}",
-                    "[TCP]".blue().bold(),
+                    "[TCP]",
                     stream.peer_addr(),
-                    addr.to_string().cyan(),
-                    format_bytes(copy.0).red(),
-                    format_bytes(copy.1).green(),
-                    format!("{:.2?}", start.elapsed()).white()
+                    addr.to_string(),
+                    format_bytes(copy.0),
+                    format_bytes(copy.1),
+                    format!("{:.2?}", start.elapsed())
                 );
             }
             Request::Associate(_addr) => {
@@ -115,21 +116,21 @@ impl Handler for CommandHandler {
                     .write_response(&Response::Success(&bind_addr))
                     .await?;
 
-                println!(
+                tracing::info!(
                     "{} Association created for {}. Client should send UDP to {}.",
-                    "[UDP]".magenta().bold(),
+                    "[UDP]",
                     stream.peer_addr(),
-                    bind_addr.to_string().yellow()
+                    bind_addr.to_string()
                 );
 
                 let start = Instant::now();
                 udp_session_run(inbound, Duration::from_secs(180)).await?;
 
-                println!(
+                tracing::info!(
                     "{} Association for {} ended | Duration: {}",
-                    "[UDP]".magenta().bold(),
+                    "[UDP]",
                     stream.peer_addr(),
-                    format!("{:.2?}", start.elapsed()).white()
+                    format!("{:.2?}", start.elapsed())
                 );
             }
             _ => {
@@ -194,11 +195,7 @@ async fn udp_session_run(inbound: Arc<UdpSocket>, idle_timeout: Duration) -> io:
             // Remove them from the map
             for k in dead_keys {
                 if map.remove(&k).is_some() {
-                    println!(
-                        "{} NAT entry for {} timed out and was removed.",
-                        "[UDP]".magenta().bold(),
-                        k
-                    );
+                    tracing::info!("{} NAT entry for {} timed out and was removed.", "[UDP]", k);
                 }
             }
         }
@@ -219,11 +216,7 @@ async fn udp_session_run(inbound: Arc<UdpSocket>, idle_timeout: Duration) -> io:
 
                 // Process the packet (find/create NAT entry, forward data).
                 if let Err(e) = handle_client_packet(&inbound, client_addr, &nat, &buf[..n]).await {
-                    eprintln!(
-                        "{} Error handling client packet: {}",
-                        "[UDP]".magenta().bold(),
-                        e
-                    );
+                    tracing::error!("{} Error handling client packet: {}", "[UDP]", e);
                     break Err(e);
                 }
             }
@@ -321,9 +314,9 @@ async fn handle_client_packet(
                                 .send_to(&response_packet.to_bytes(), client_addr)
                                 .await
                             {
-                                eprintln!(
+                                tracing::error!(
                                     "{} Failed to send reply to client for target {}: {}",
-                                    "[UDP]".magenta().bold(),
+                                    "[UDP]",
                                     original_target_key,
                                     e
                                 );
@@ -331,9 +324,9 @@ async fn handle_client_packet(
                             }
                         }
                         Err(e) => {
-                            eprintln!(
+                            tracing::error!(
                                 "{} Error on outbound socket for target {}: {}",
-                                "[UDP]".magenta().bold(),
+                                "[UDP]",
                                 original_target_key,
                                 e
                             );
@@ -344,10 +337,10 @@ async fn handle_client_packet(
             })
         };
 
-        println!(
+        tracing::info!(
             "{} New NAT entry created for target: {}",
-            "[UDP]".magenta().bold(),
-            target_key.cyan()
+            "[UDP]",
+            target_key
         );
         let entry = OutboundEntry {
             socket: outbound,
@@ -369,20 +362,4 @@ async fn handle_client_packet(
     }
 
     Ok(())
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const KIB: u64 = 1024;
-    const MIB: u64 = KIB * 1024;
-    const GIB: u64 = MIB * 1024;
-
-    if bytes >= GIB {
-        format!("{:.2} GiB", bytes as f64 / GIB as f64)
-    } else if bytes >= MIB {
-        format!("{:.2} MiB", bytes as f64 / MIB as f64)
-    } else if bytes >= KIB {
-        format!("{:.2} KiB", bytes as f64 / KIB as f64)
-    } else {
-        format!("{} B", bytes)
-    }
 }
