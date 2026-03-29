@@ -9,7 +9,7 @@ use colored::*;
 use socks_lib::io::{self, AsyncRead, AsyncWrite};
 use socks_lib::net::{TcpListener, TcpStream, UdpSocket};
 use socks_lib::v5::server::auth::{NoAuthentication, UserPassword};
-use socks_lib::v5::server::{Config, Handler, Server};
+use socks_lib::v5::server::{Config as SocksConfig, Handler, Server};
 use socks_lib::v5::{Address, Request, Response, Stream, UdpPacket};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -31,15 +31,17 @@ pub async fn run(
         tokio::signal::ctrl_c().await.unwrap();
     };
 
+    let handler = CommandHandler;
+
     match (username, password) {
         (Some(u), Some(p)) => {
-            let config = Config::new(UserPassword::new(u, p), CommandHandler);
+            let config = SocksConfig::new(UserPassword::new(u, p), handler);
             Server::run(listener, config.into(), shutdown)
                 .await
                 .context("SOCKS5 server (auth) encountered a fatal error")
         }
         _ => {
-            let config = Config::new(NoAuthentication, CommandHandler);
+            let config = SocksConfig::new(NoAuthentication, handler);
             Server::run(listener, config.into(), shutdown)
                 .await
                 .context("SOCKS5 server (no-auth) encountered a fatal error")
@@ -54,13 +56,40 @@ impl Handler for CommandHandler {
     where
         T: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     {
-        // println!("Request: {request:?}");
-
         match request {
             Request::Connect(addr) => {
+                println!(
+                    "{} {} → connecting to {}",
+                    "[TCP]".blue().bold(),
+                    stream.peer_addr(),
+                    addr.to_string().cyan()
+                );
                 stream.write_response_unspecified().await?;
 
-                let mut target = TcpStream::connect(addr.to_string()).await?;
+                // Force IPv4 for outgoing connections
+                let target_addr = match addr {
+                    Address::Domain(ref domain, port) => {
+                        let full_addr = format!("{}:{}", domain.format_as_str(), port);
+                        tokio::net::lookup_host(full_addr)
+                            .await?
+                            .find(|a| a.is_ipv4())
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    "No IPv4 address found for domain",
+                                )
+                            })?
+                    }
+                    Address::IPv6(_) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "IPv6 is disabled, only IPv4 is supported",
+                        ));
+                    }
+                    _ => addr.clone().to_socket_addr().await?,
+                };
+
+                let mut target = TcpStream::connect(target_addr).await?;
                 let start = Instant::now();
                 let copy = io::copy_bidirectional(stream, &mut target).await?;
 
@@ -74,7 +103,7 @@ impl Handler for CommandHandler {
                     format!("{:.2?}", start.elapsed()).white()
                 );
             }
-            Request::Associate(_) => {
+            Request::Associate(_addr) => {
                 let server_ip = stream.local_addr().ip();
 
                 let inbound = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
@@ -165,7 +194,11 @@ async fn udp_session_run(inbound: Arc<UdpSocket>, idle_timeout: Duration) -> io:
             // Remove them from the map
             for k in dead_keys {
                 if map.remove(&k).is_some() {
-                    println!("[UDP] NAT entry for {} timed out and was removed.", k);
+                    println!(
+                        "{} NAT entry for {} timed out and was removed.",
+                        "[UDP]".magenta().bold(),
+                        k
+                    );
                 }
             }
         }
@@ -186,7 +219,11 @@ async fn udp_session_run(inbound: Arc<UdpSocket>, idle_timeout: Duration) -> io:
 
                 // Process the packet (find/create NAT entry, forward data).
                 if let Err(e) = handle_client_packet(&inbound, client_addr, &nat, &buf[..n]).await {
-                    eprintln!("[UDP] Error handling client packet: {}", e);
+                    eprintln!(
+                        "{} Error handling client packet: {}",
+                        "[UDP]".magenta().bold(),
+                        e
+                    );
                     break Err(e);
                 }
             }
@@ -232,16 +269,22 @@ async fn handle_client_packet(
 
     // 2. Resolve the destination address to a concrete SocketAddr.
     // This is crucial for using a consistent key in our NAT map and for async operation.
+    // Force IPv4 here as well.
     let target_sock_addr: SocketAddr = match pkt.address {
         Address::IPv4(v4) => SocketAddr::V4(v4),
-        Address::IPv6(v6) => SocketAddr::V6(v6),
+        Address::IPv6(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "IPv6 UDP is disabled, only IPv4 is supported",
+            ));
+        }
         Address::Domain(ref domain, port) => {
             let full_addr = format!("{}:{}", domain.format_as_str(), port);
             tokio::net::lookup_host(full_addr)
                 .await?
-                .next()
+                .find(|a| a.is_ipv4())
                 .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::NotFound, "Domain resolution failed")
+                    io::Error::new(io::ErrorKind::NotFound, "No IPv4 address found for domain")
                 })?
         }
     };
@@ -279,16 +322,20 @@ async fn handle_client_packet(
                                 .await
                             {
                                 eprintln!(
-                                    "[UDP] Failed to send reply to client for target {}: {}",
-                                    original_target_key, e
+                                    "{} Failed to send reply to client for target {}: {}",
+                                    "[UDP]".magenta().bold(),
+                                    original_target_key,
+                                    e
                                 );
                                 break;
                             }
                         }
                         Err(e) => {
                             eprintln!(
-                                "[UDP] Error on outbound socket for target {}: {}",
-                                original_target_key, e
+                                "{} Error on outbound socket for target {}: {}",
+                                "[UDP]".magenta().bold(),
+                                original_target_key,
+                                e
                             );
                             break;
                         }
