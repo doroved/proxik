@@ -18,13 +18,14 @@ use crate::utils::format_bytes;
 
 pub async fn run(
     bind_addr: &str,
+    port: u16,
     username: Option<String>,
     password: Option<String>,
 ) -> Result<()> {
     let listener = TcpListener::bind(bind_addr).await?;
     tracing::info!(
-        "{} server listening on {}",
-        "SOCKS5",
+        "[SOCKS5:{}] server listening on {}",
+        port,
         listener.local_addr()?.to_string()
     );
 
@@ -32,7 +33,7 @@ pub async fn run(
         tokio::signal::ctrl_c().await.unwrap();
     };
 
-    let handler = CommandHandler;
+    let handler = CommandHandler { port };
 
     match (username, password) {
         (Some(u), Some(p)) => {
@@ -50,7 +51,9 @@ pub async fn run(
     }
 }
 
-pub struct CommandHandler;
+pub struct CommandHandler {
+    pub port: u16,
+}
 
 impl Handler for CommandHandler {
     async fn handle<T>(&self, stream: &mut Stream<T>, request: Request) -> io::Result<()>
@@ -60,8 +63,8 @@ impl Handler for CommandHandler {
         match request {
             Request::Connect(addr) => {
                 tracing::info!(
-                    "{} {} → connecting to {}",
-                    "[TCP]",
+                    "[TCP:{}] {} → connecting to {}",
+                    self.port,
                     stream.peer_addr(),
                     addr.to_string()
                 );
@@ -95,8 +98,8 @@ impl Handler for CommandHandler {
                 let copy = io::copy_bidirectional(stream, &mut target).await?;
 
                 tracing::info!(
-                    "{} {} → {} | Sent: {}, Received: {} | Duration: {}",
-                    "[TCP]",
+                    "[TCP:{}] {} → {} | Sent: {}, Received: {} | Duration: {}",
+                    self.port,
                     stream.peer_addr(),
                     addr.to_string(),
                     format_bytes(copy.0),
@@ -117,18 +120,18 @@ impl Handler for CommandHandler {
                     .await?;
 
                 tracing::info!(
-                    "{} Association created for {}. Client should send UDP to {}.",
-                    "[UDP]",
+                    "[UDP:{}] Association created for {}. Client should send UDP to {}.",
+                    self.port,
                     stream.peer_addr(),
                     bind_addr.to_string()
                 );
 
                 let start = Instant::now();
-                udp_session_run(inbound, Duration::from_secs(180)).await?;
+                udp_session_run(inbound, self.port, Duration::from_secs(180)).await?;
 
                 tracing::info!(
-                    "{} Association for {} ended | Duration: {}",
-                    "[UDP]",
+                    "[UDP:{}] Association for {} ended | Duration: {}",
+                    self.port,
                     stream.peer_addr(),
                     format!("{:.2?}", start.elapsed())
                 );
@@ -154,7 +157,11 @@ struct OutboundEntry {
 /// Manages a single SOCKS5 UDP ASSOCIATE session.
 /// It implements a NAT-like mechanism to correctly handle multiple concurrent UDP "connections"
 /// from one client to various destinations.
-async fn udp_session_run(inbound: Arc<UdpSocket>, idle_timeout: Duration) -> io::Result<()> {
+async fn udp_session_run(
+    inbound: Arc<UdpSocket>,
+    port: u16,
+    idle_timeout: Duration,
+) -> io::Result<()> {
     // A buffer large enough for most UDP packets.
     let mut buf = vec![0u8; 65535];
 
@@ -195,14 +202,18 @@ async fn udp_session_run(inbound: Arc<UdpSocket>, idle_timeout: Duration) -> io:
             // Remove them from the map
             for k in dead_keys {
                 if map.remove(&k).is_some() {
-                    tracing::info!("{} NAT entry for {} timed out and was removed.", "[UDP]", k);
+                    tracing::info!(
+                        "[UDP:{}] NAT entry for {} timed out and was removed.",
+                        port,
+                        k
+                    );
                 }
             }
         }
     });
 
     // Handle the very first packet we received before the loop.
-    handle_client_packet(&inbound, client_addr, &nat, &buf[..n]).await?;
+    handle_client_packet(&inbound, port, client_addr, &nat, &buf[..n]).await?;
 
     // --- Main inbound loop ---
     // This loop continuously receives packets from the SOCKS client and forwards them.
@@ -215,7 +226,9 @@ async fn udp_session_run(inbound: Arc<UdpSocket>, idle_timeout: Duration) -> io:
                 }
 
                 // Process the packet (find/create NAT entry, forward data).
-                if let Err(e) = handle_client_packet(&inbound, client_addr, &nat, &buf[..n]).await {
+                if let Err(e) =
+                    handle_client_packet(&inbound, port, client_addr, &nat, &buf[..n]).await
+                {
                     tracing::error!("{} Error handling client packet: {}", "[UDP]", e);
                     break Err(e);
                 }
@@ -248,6 +261,7 @@ async fn udp_session_run(inbound: Arc<UdpSocket>, idle_timeout: Duration) -> io:
 /// and forwards the data.
 async fn handle_client_packet(
     inbound: &Arc<UdpSocket>,
+    port: u16,
     client_addr: SocketAddr,
     nat: &Arc<Mutex<HashMap<String, OutboundEntry>>>,
     raw: &[u8],
@@ -315,8 +329,8 @@ async fn handle_client_packet(
                                 .await
                             {
                                 tracing::error!(
-                                    "{} Failed to send reply to client for target {}: {}",
-                                    "[UDP]",
+                                    "[UDP:{}] Failed to send reply to client for target {}: {}",
+                                    port,
                                     original_target_key,
                                     e
                                 );
@@ -325,8 +339,8 @@ async fn handle_client_packet(
                         }
                         Err(e) => {
                             tracing::error!(
-                                "{} Error on outbound socket for target {}: {}",
-                                "[UDP]",
+                                "[UDP:{}] Error on outbound socket for target {}: {}",
+                                port,
                                 original_target_key,
                                 e
                             );
@@ -338,8 +352,8 @@ async fn handle_client_packet(
         };
 
         tracing::info!(
-            "{} New NAT entry created for target: {}",
-            "[UDP]",
+            "[UDP:{}] New NAT entry created for target: {}",
+            port,
             target_key
         );
         let entry = OutboundEntry {

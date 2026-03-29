@@ -1,5 +1,6 @@
 use crate::utils::format_bytes;
 use anyhow::Result;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
@@ -9,23 +10,34 @@ use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 
-pub async fn run(bind_addr: &str, _: Option<String>, _: Option<String>) -> Result<()> {
+pub async fn run(
+    bind_addr: &str,
+    port: u16,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<()> {
     let listener = TcpListener::bind(bind_addr).await?;
     tracing::info!(
-        "{} server listening on {}",
-        "HTTP",
+        "[HTTP:{}] server listening on {}",
+        port,
         listener.local_addr()?.to_string()
     );
 
+    let auth = match (username, password) {
+        (Some(u), Some(p)) => Some(format!("{}:{}", u, p)),
+        _ => None,
+    };
+
     loop {
         let (stream, addr) = listener.accept().await?;
+        let auth = auth.clone();
         tokio::spawn(async move {
             let _ = http1::Builder::new()
                 .preserve_header_case(true)
                 .title_case_headers(true)
                 .serve_connection(
                     TokioIo::new(stream),
-                    service_fn(move |req| proxy(req, addr)),
+                    service_fn(move |req| proxy(req, addr, port, auth.clone())),
                 )
                 .with_upgrades()
                 .await;
@@ -36,7 +48,31 @@ pub async fn run(bind_addr: &str, _: Option<String>, _: Option<String>) -> Resul
 async fn proxy(
     req: Request<hyper::body::Incoming>,
     client_addr: SocketAddr,
+    proxy_port: u16,
+    auth_required: Option<String>,
 ) -> Result<Response<BoxBody<Bytes, std::io::Error>>, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(expected) = auth_required {
+        let authenticated = req
+            .headers()
+            .get(hyper::header::PROXY_AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|s| s.strip_prefix("Basic "))
+            .and_then(|e| BASE64.decode(e).ok())
+            .and_then(|d| String::from_utf8(d).ok())
+            == Some(expected);
+
+        if !authenticated {
+            let resp = Response::builder()
+                .status(hyper::StatusCode::PROXY_AUTHENTICATION_REQUIRED)
+                .header(hyper::header::PROXY_AUTHENTICATE, "Basic realm=\"proxik\"")
+                .body(BoxBody::new(
+                    Full::new(Bytes::from("Proxy Authentication Required")).map_err(|e| match e {}),
+                ))
+                .unwrap();
+            return Ok(resp);
+        }
+    }
+
     if Method::CONNECT == req.method() {
         let addr = req
             .uri()
@@ -45,7 +81,7 @@ async fn proxy(
             .unwrap_or_default();
         tokio::spawn(async move {
             if let Ok(upgraded) = hyper::upgrade::on(req).await {
-                let _ = tunnel(upgraded, addr, client_addr).await;
+                let _ = tunnel(upgraded, addr, client_addr, proxy_port).await;
             }
         });
         Ok(Response::new(BoxBody::new(
@@ -56,7 +92,12 @@ async fn proxy(
         let port = req.uri().port_u16().unwrap_or(80);
         let target = format!("{}:{}", host, port);
 
-        tracing::info!("{} {} → connecting to {}", "[HTTP]", client_addr, target);
+        tracing::info!(
+            "[HTTP:{}] {} → connecting to {}",
+            proxy_port,
+            client_addr,
+            target
+        );
         let start = std::time::Instant::now();
         let method = req.method().clone();
         let path = req
@@ -76,8 +117,8 @@ async fn proxy(
         let resp = sender.send_request(req).await?;
 
         tracing::info!(
-            "{} {} → {} | {} {} | Status: {} | Duration: {}",
-            "[HTTP]",
+            "[HTTP:{}] {} → {} | {} {} | Status: {} | Duration: {}",
+            proxy_port,
             client_addr,
             target,
             method.as_str(),
@@ -90,14 +131,24 @@ async fn proxy(
     }
 }
 
-async fn tunnel(upgraded: Upgraded, addr: String, client_addr: SocketAddr) -> Result<()> {
+async fn tunnel(
+    upgraded: Upgraded,
+    addr: String,
+    client_addr: SocketAddr,
+    proxy_port: u16,
+) -> Result<()> {
     let mut server = TcpStream::connect(&addr).await?;
-    tracing::info!("{} {} → connecting to {}", "[HTTP]", client_addr, addr);
+    tracing::info!(
+        "[HTTP:{}] {} → connecting to {}",
+        proxy_port,
+        client_addr,
+        addr
+    );
     let start = std::time::Instant::now();
     let (tx, rx) = tokio::io::copy_bidirectional(&mut TokioIo::new(upgraded), &mut server).await?;
     tracing::info!(
-        "{} {} → {} | Sent: {}, Received: {} | Duration: {}",
-        "[HTTP]",
+        "[HTTP:{}] {} → {} | Sent: {}, Received: {} | Duration: {}",
+        proxy_port,
         client_addr,
         addr,
         format_bytes(tx),

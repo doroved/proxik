@@ -8,7 +8,7 @@ Lightweight and minimalistic HTTP, HTTPS, and SOCKS5 proxy server written in Rus
 - **Authentication**: User/Password authentication support for SOCKS5.
 - **CLI Management**: Powerful CLI inspired by industry standards.
 - **Single Process Daemon**: Manage all your proxies via a single background process.
-- **Auto-Config**: Save proxies to `~/.proxik/config.toml` with duplicate detection using the `--save` flag.
+- **Auto-Config**: Save proxies to `~/.proxik/config.toml` and manage them easily via CLI commands.
 - **Auto-Update**: Built-in self-update mechanism via GitHub Releases.
 - **Daemon Mode**: Run and manage Proxik as a background service.
 - **HTTPS & Let's Encrypt**: (Planned) Automatic certificate management for HTTPS proxies.
@@ -48,26 +48,47 @@ To run all proxies defined in `~/.proxik/config.toml` in the foreground:
 proxik run
 ```
 
-To run a specific proxy (without starting others from config):
+To run a specific proxy on the fly (without saving it to config):
 
 ```bash
-proxik run --port 1080 socks5
+proxik run socks5 --port 1080
+```
+
+### Configuration Management
+
+Manage your `~/.proxik/config.toml` configuration easily:
+
+```bash
+# Add a new proxy to config
+# Note: If the daemon is running, it will automatically restart to apply changes!
+proxik add socks5 --port 1080 --auth admin:hello
+
+# Add an HTTP proxy
+proxik add http --port 8080
+
+# Remove a proxy from config by port
+proxik rm 1080
+
+# Remove all proxies from config
+proxik rm --all
 ```
 
 ### Daemon Management
 
-You can run Proxik in the background as a single daemon process.
+You can run Proxik in the background as a single daemon process. It will run all proxies defined in your configuration.
 
 ```bash
 # Start all configured proxies in background
 proxik start
 
-# Add a new proxy to config and save it (~/.proxik/config.toml)
-# Note: This updates the config even if the daemon is already running.
-proxik start --port 1080 --save socks5 --username admin --password hello
+# Restart the daemon
+proxik restart
 
 # Stop the daemon
 proxik stop
+
+# View daemon logs
+proxik log
 ```
 
 *Logs and PID files are stored in `~/.proxik/` (`proxik.log`, `proxik.pid`).*
@@ -77,7 +98,7 @@ proxik stop
 To see all configured proxies and their current status:
 
 ```bash
-proxik list
+proxik ls
 ```
 
 Example output:
@@ -98,18 +119,21 @@ proxik update
 
 ### Command Overview
 
-- `run`: Run in foreground.
-  - `-p, --port <PORT>`: Listen port (default: `1080`).
-  - `-s, --save`: Save this proxy configuration to `~/.proxik/config.toml`.
-  - `socks5`: SOCKS5 protocol subcommand.
-    - `-u, --username <USER>`: Optional username for auth.
-    - `-p, --password <PASS>`: Optional password for auth.
-  - `http`: HTTP protocol subcommand (Planned).
-- `start`: Start as a background daemon. Supports the same arguments as `run`.
+- `add`: Add a proxy to configuration.
+  - `socks5`: SOCKS5 protocol.
+    - `-p, --port <PORT>`: Listen port (default: `1080`).
+    - `-a, --auth <user:pass>`: Optional credentials for authentication.
+  - `http`: HTTP protocol.
+    - `-p, --port <PORT>`: Listen port (default: `1080`).
+- `rm <PORT>`: Remove a proxy from configuration.
+  - `-a, --all`: Remove all proxies from configuration.
+- `run`: Run proxies in foreground. Without arguments, runs all from config. Can accept `socks5`/`http` to run a single proxy on the fly.
+- `start`: Start daemon (runs all configured proxies).
 - `stop`: Stop the background daemon.
-- `list`: Show all configured proxies and their status.
-- `update`: Update the application.
-- `restart/log`: (Planned) Additional daemon management.
+- `restart`: Restart the background daemon.
+- `log`: View daemon logs.
+- `ls`: Show all configured proxies and their status.
+- `update`: Update the application from GitHub.
 
 ## Configuration
 

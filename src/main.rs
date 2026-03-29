@@ -8,14 +8,14 @@ pub mod utils;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Commands, RunCommands};
+use cli::{Cli, Commands, ProxyCommands};
 use colored::*;
 use config::{Config, ProxyConfig};
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
-        .with_target(false)
+        // .with_target(false)
         .with_ansi(true)
         .with_ansi_sanitization(false)
         .init();
@@ -24,74 +24,169 @@ fn main() -> Result<()> {
     let mut config = Config::load()?;
 
     match cli.command {
-        Commands::Run { port, save, cmd } => {
-            let proxies_to_run = get_proxies_to_run(&mut config, port, save, cmd)?;
-            if proxies_to_run.is_empty() {
-                return Ok(());
+        Commands::Add { cmd } => {
+            let proxy = match cmd {
+                ProxyCommands::Socks5 { port, auth } => {
+                    let (username, password) = if let Some(a) = auth {
+                        let parts: Vec<&str> = a.splitn(2, ':').collect();
+                        if parts.len() == 2 {
+                            (Some(parts[0].to_string()), Some(parts[1].to_string()))
+                        } else {
+                            println!("Invalid auth format. Use user:pass");
+                            return Ok(());
+                        }
+                    } else {
+                        (None, None)
+                    };
+                    ProxyConfig {
+                        protocol: "socks5".to_string(),
+                        port,
+                        username,
+                        password,
+                    }
+                }
+                ProxyCommands::Http { port, auth } => {
+                    let (username, password) = if let Some(a) = auth {
+                        let parts: Vec<&str> = a.splitn(2, ':').collect();
+                        if parts.len() == 2 {
+                            (Some(parts[0].to_string()), Some(parts[1].to_string()))
+                        } else {
+                            println!("Invalid auth format. Use user:pass");
+                            return Ok(());
+                        }
+                    } else {
+                        (None, None)
+                    };
+                    ProxyConfig {
+                        protocol: "http".to_string(),
+                        port,
+                        username,
+                        password,
+                    }
+                }
+            };
+
+            match config.add_proxy(proxy.clone()) {
+                Some(old) => {
+                    println!(
+                        "Proxy on port {} overwritten: (User: {}, Pass: {}) → (User: {}, Pass: {})",
+                        proxy.port,
+                        old.username.unwrap_or_else(|| "-".to_string()),
+                        old.password.unwrap_or_else(|| "-".to_string()),
+                        proxy.username.clone().unwrap_or_else(|| "-".to_string()),
+                        proxy.password.clone().unwrap_or_else(|| "-".to_string())
+                    );
+                }
+                None => {
+                    println!("Proxy on port {} added to config.", proxy.port);
+                }
             }
+            config.save()?;
+
+            if daemon::is_running() {
+                println!("Daemon is running. Restarting to apply changes...");
+                daemon::stop_daemon()?;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                daemon::start_daemon()?;
+            }
+        }
+        Commands::Rm { port, all } => {
+            if all {
+                if config.proxies.is_empty() {
+                    println!("No proxies found in config.");
+                    return Ok(());
+                }
+                config.proxies.clear();
+                config.save()?;
+                println!("All proxies removed from config.");
+                if daemon::is_running() {
+                    println!("Daemon is running. Stopping daemon...");
+                    daemon::stop_daemon()?;
+                }
+            } else if let Some(p) = port {
+                if let Some(removed) = config.remove_proxy(p) {
+                    config.save()?;
+                    println!(
+                        "Proxy on port {} ({}) removed from config.",
+                        p, removed.protocol
+                    );
+                    if daemon::is_running() {
+                        println!("Daemon is running. Restarting to apply changes...");
+                        daemon::stop_daemon()?;
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        daemon::start_daemon()?;
+                    }
+                } else {
+                    println!("No proxy found on port {} in config.", p);
+                }
+            }
+        }
+        Commands::Run { cmd } => {
+            let proxies_to_run = if let Some(run_cmd) = cmd {
+                vec![match run_cmd {
+                    ProxyCommands::Socks5 { port, auth } => {
+                        let (username, password) = if let Some(a) = auth {
+                            let parts: Vec<&str> = a.splitn(2, ':').collect();
+                            if parts.len() == 2 {
+                                (Some(parts[0].to_string()), Some(parts[1].to_string()))
+                            } else {
+                                println!("Invalid auth format. Use user:pass");
+                                return Ok(());
+                            }
+                        } else {
+                            (None, None)
+                        };
+                        ProxyConfig {
+                            protocol: "socks5".to_string(),
+                            port,
+                            username,
+                            password,
+                        }
+                    }
+                    ProxyCommands::Http { port, auth } => {
+                        let (username, password) = if let Some(a) = auth {
+                            let parts: Vec<&str> = a.splitn(2, ':').collect();
+                            if parts.len() == 2 {
+                                (Some(parts[0].to_string()), Some(parts[1].to_string()))
+                            } else {
+                                println!("Invalid auth format. Use user:pass");
+                                return Ok(());
+                            }
+                        } else {
+                            (None, None)
+                        };
+                        ProxyConfig {
+                            protocol: "http".to_string(),
+                            port,
+                            username,
+                            password,
+                        }
+                    }
+                }]
+            } else {
+                if config.proxies.is_empty() {
+                    println!(
+                        "No proxies configured. Use 'add' to save one to config or pass proxy arguments."
+                    );
+                    return Ok(());
+                }
+                config.proxies.clone()
+            };
 
             let rt = tokio::runtime::Runtime::new()?;
             update_public_ip(&rt, &mut config);
 
             rt.block_on(run_proxies(proxies_to_run))?;
         }
-        Commands::Start { port, save, cmd } => {
-            let mut overwritten = false;
-
-            if let Some(run_cmd) = save.then_some(cmd).flatten() {
-                let proxy = match run_cmd {
-                    RunCommands::Socks5 { username, password } => ProxyConfig {
-                        protocol: "socks5".to_string(),
-                        port,
-                        username,
-                        password,
-                    },
-                    RunCommands::Http => ProxyConfig {
-                        protocol: "http".to_string(),
-                        port,
-                        username: None,
-                        password: None,
-                    },
-                };
-
-                match config.add_proxy(proxy.clone()) {
-                    Some(old) => {
-                        config.save()?;
-                        tracing::info!(
-                            "Proxy on port {} {} (User: {}, Pass: {}) → (User: {}, Pass: {})",
-                            proxy.port,
-                            "overwritten:",
-                            old.username.unwrap_or_else(|| "-".to_string()),
-                            old.password.unwrap_or_else(|| "-".to_string()),
-                            proxy.username.clone().unwrap_or_else(|| "-".to_string()),
-                            proxy.password.clone().unwrap_or_else(|| "-".to_string())
-                        );
-                        overwritten = true;
-                    }
-                    None => {
-                        config.save()?;
-                        tracing::info!("Proxy on port {} added to config.", proxy.port);
-                    }
-                }
+        Commands::Start => {
+            let proxies_to_run = config.proxies.clone();
+            if proxies_to_run.is_empty() {
+                println!("No proxies configured. Use 'add' to add one.");
+                return Ok(());
             }
 
             if daemon::is_running() {
-                if overwritten {
-                    tracing::info!("Restarting Proxik daemon to apply changes...");
-                    daemon::stop_daemon()?;
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                } else {
-                    tracing::info!("Proxik daemon is already running.");
-                    tracing::info!(
-                        "To apply new config, please restart the daemon: stop then start or use 'restart'."
-                    );
-                    return Ok(());
-                }
-            }
-
-            let proxies_to_run = config.proxies.clone();
-            if proxies_to_run.is_empty() {
-                tracing::warn!("No proxies configured. Use '--save' to add one.");
+                println!("Proxik daemon is already running.");
                 return Ok(());
             }
 
@@ -102,16 +197,16 @@ fn main() -> Result<()> {
         }
         Commands::Restart => {
             if !daemon::is_running() {
-                tracing::info!("Proxik is not running. Starting it...");
+                println!("Proxik is not running. Starting it...");
             } else {
-                tracing::info!("Restarting Proxik daemon...");
+                println!("Restarting Proxik daemon...");
                 daemon::stop_daemon()?;
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
 
             let proxies_to_run = config.proxies.clone();
             if proxies_to_run.is_empty() {
-                tracing::warn!("No proxies configured in ~/.proxik/config.toml");
+                println!("No proxies configured in ~/.proxik/config.toml");
                 return Ok(());
             }
 
@@ -124,15 +219,18 @@ fn main() -> Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(updater::update())?;
         }
+        Commands::Log => {
+            daemon::show_logs()?;
+        }
         Commands::Stop => {
             daemon::stop_daemon()?;
         }
-        Commands::List => {
+        Commands::Ls => {
             if config.proxies.is_empty() {
                 println!("No proxies configured in ~/.proxik/config.toml");
             } else {
                 let rt = tokio::runtime::Runtime::new()?;
-                let public_ip = config.public_ip.as_deref().unwrap_or("IP");
+                let public_ip = config.public_ip.as_deref().unwrap_or("0.0.0.0");
 
                 struct Row {
                     protocol: String,
@@ -248,7 +346,7 @@ fn main() -> Result<()> {
                         r.status,
                         r.user,
                         r.pass,
-                        r.url.cyan(),
+                        r.url.bright_blue(),
                         w_proto = w_proto,
                         w_bind = w_bind,
                         w_status = w_status,
@@ -257,9 +355,6 @@ fn main() -> Result<()> {
                     );
                 }
             }
-        }
-        _ => {
-            tracing::warn!("Command not fully implemented yet.");
         }
     }
 
@@ -276,67 +371,31 @@ fn update_public_ip(rt: &tokio::runtime::Runtime, config: &mut Config) {
 }
 
 async fn fetch_public_ip() -> Result<String> {
+    let services = [
+        "https://api.ipify.org",
+        "https://api.ip.sb/ip",
+        "https://4.ident.me",
+    ];
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()?;
-    let resp = client.get("https://api.ipify.org").send().await?;
-    let ip = resp.text().await?;
-    Ok(ip)
-}
 
-fn get_proxies_to_run(
-    config: &mut Config,
-    port: u16,
-    save: bool,
-    cmd: Option<RunCommands>,
-) -> Result<Vec<ProxyConfig>> {
-    if let Some(run_cmd) = cmd {
-        let proxy = match run_cmd {
-            RunCommands::Socks5 { username, password } => ProxyConfig {
-                protocol: "socks5".to_string(),
-                port,
-                username,
-                password,
-            },
-            RunCommands::Http => ProxyConfig {
-                protocol: "http".to_string(),
-                port,
-                username: None,
-                password: None,
-            },
+    for service in services {
+        let Ok(resp) = client.get(service).send().await else {
+            continue;
+        };
+        let Ok(ip) = resp.text().await else {
+            continue;
         };
 
-        if save {
-            match config.add_proxy(proxy.clone()) {
-                Some(old) => {
-                    config.save()?;
-                    tracing::info!(
-                        "Proxy on port {} {} (User: {}, Pass: {}) → (User: {}, Pass: {})",
-                        proxy.port,
-                        "overwritten:",
-                        old.username.unwrap_or_else(|| "-".to_string()),
-                        old.password.unwrap_or_else(|| "-".to_string()),
-                        proxy.username.clone().unwrap_or_else(|| "-".to_string()),
-                        proxy.password.clone().unwrap_or_else(|| "-".to_string())
-                    );
-                }
-                None => {
-                    config.save()?;
-                    tracing::info!("Proxy on port {} added to config.", proxy.port);
-                }
-            }
+        let ip = ip.trim();
+        if !ip.is_empty() {
+            return Ok(ip.to_string());
         }
-
-        Ok(vec![proxy])
-    } else {
-        if config.proxies.is_empty() {
-            tracing::warn!(
-                "No proxies configured. Use 'run --save <PROTOCOL>' to add one or check ~/.proxik/config.toml"
-            );
-            return Ok(vec![]);
-        }
-        Ok(config.proxies.clone())
     }
+
+    anyhow::bail!("Failed to fetch public IP from all services")
 }
 
 async fn run_proxies(proxies: Vec<ProxyConfig>) -> Result<()> {
@@ -345,16 +404,18 @@ async fn run_proxies(proxies: Vec<ProxyConfig>) -> Result<()> {
         let bind = format!("0.0.0.0:{}", proxy.port);
         match proxy.protocol.as_str() {
             "socks5" => {
+                let port = proxy.port;
                 let h = tokio::spawn(async move {
-                    if let Err(e) = socks5::run(&bind, proxy.username, proxy.password).await {
+                    if let Err(e) = socks5::run(&bind, port, proxy.username, proxy.password).await {
                         tracing::error!("SOCKS5 server error on {}: {}", bind, e);
                     }
                 });
                 handles.push(h);
             }
             "http" => {
+                let port = proxy.port;
                 let h = tokio::spawn(async move {
-                    if let Err(e) = http::run(&bind, proxy.username, proxy.password).await {
+                    if let Err(e) = http::run(&bind, port, proxy.username, proxy.password).await {
                         tracing::error!("HTTP server error on {}: {}", bind, e);
                     }
                 });
@@ -366,8 +427,15 @@ async fn run_proxies(proxies: Vec<ProxyConfig>) -> Result<()> {
         }
     }
 
-    for h in handles {
-        let _ = h.await;
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("Shutting down...");
+        }
+        _ = async {
+            for h in handles {
+                let _ = h.await;
+            }
+        } => {}
     }
     Ok(())
 }

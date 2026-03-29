@@ -63,4 +63,14 @@ impl Config {
             None
         }
     }
+
+    /// Removes a proxy by port.
+    /// Returns the removed config if it existed.
+    pub fn remove_proxy(&mut self, port: u16) -> Option<ProxyConfig> {
+        if let Some(index) = self.proxies.iter().position(|p| p.port == port) {
+            Some(self.proxies.remove(index))
+        } else {
+            None
+        }
+    }
 }

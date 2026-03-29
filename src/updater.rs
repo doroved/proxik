@@ -20,7 +20,7 @@ pub async fn update() -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");
 
-    tracing::info!("Checking for updates (current version: v{})...", version);
+    println!("Checking for updates (current version: v{})...", version);
 
     let client = reqwest::Client::builder()
         .user_agent(format!("{}-updater", name))
@@ -42,11 +42,11 @@ pub async fn update() -> Result<()> {
 
     // Manual version comparison (semantic versioning: major.minor.patch)
     if !is_newer(latest_tag, version) {
-        tracing::info!("You are already using the latest version (v{}).", version);
+        println!("You are already using the latest version (v{}).", version);
         return Ok(());
     }
 
-    tracing::info!("New version found: v{}. Downloading...", latest_tag);
+    println!("New version found: v{}. Downloading...", latest_tag);
 
     // Detect architecture
     let arch = std::env::consts::ARCH;
@@ -77,7 +77,7 @@ pub async fn update() -> Result<()> {
 
     let content = response.bytes().await?;
 
-    tracing::info!("Unpacking using system tar...");
+    println!("Unpacking using system tar...");
     let temp_dir = std::env::temp_dir().join(format!("{}_update_dir", name));
     let archive_path = std::env::temp_dir().join(format!("{}_update.tar.gz", name));
 
@@ -119,10 +119,10 @@ pub async fn update() -> Result<()> {
 
     let target_path = format!("/usr/local/bin/{}", name);
 
-    tracing::info!("Stopping daemon...");
+    println!("Stopping daemon...");
     let _ = Command::new(&target_path).arg("stop").output();
 
-    tracing::info!("Installing new binary to {}...", target_path);
+    println!("Installing new binary to {}...", target_path);
 
     // To bypass "Text file busy" (OS error 26), we use fs::rename instead of fs::copy.
     if fs::rename(&new_binary, &target_path).is_err() {
@@ -137,13 +137,14 @@ pub async fn update() -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(&target_path)?.permissions();
         perms.set_mode(0o755);
+        #[cfg(unix)]
         fs::set_permissions(&target_path, perms)?;
     }
 
-    tracing::info!("Starting daemon...");
+    println!("Starting daemon...");
     let _ = Command::new(&target_path).arg("start").spawn()?;
 
-    tracing::info!("Successfully updated to v{}!", latest_tag);
+    println!("Successfully updated to v{}!", latest_tag);
 
     // Clean up
     let _ = fs::remove_dir_all(&temp_dir);
