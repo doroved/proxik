@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
+use colored::*;
 use socks_lib::io::{self, AsyncRead, AsyncWrite};
 use socks_lib::net::{TcpListener, TcpStream, UdpSocket};
 use socks_lib::v5::server::auth::{NoAuthentication, UserPassword};
@@ -20,7 +21,11 @@ pub async fn run(
     password: Option<String>,
 ) -> Result<()> {
     let listener = TcpListener::bind(bind_addr).await?;
-    println!("SOCKS5 server listening on {}", listener.local_addr()?);
+    println!(
+        "{} server listening on {}",
+        "SOCKS5".blue().bold(),
+        listener.local_addr()?.to_string().green()
+    );
 
     let shutdown = async {
         tokio::signal::ctrl_c().await.unwrap();
@@ -60,12 +65,13 @@ impl Handler for CommandHandler {
                 let copy = io::copy_bidirectional(stream, &mut target).await?;
 
                 println!(
-                    "[TCP] {} → {} | Sent: {}, Received: {} | Duration: {:.2?}",
+                    "{} {} → {} | Sent: {}, Received: {} | Duration: {}",
+                    "[TCP]".blue().bold(),
                     stream.peer_addr(),
-                    addr,
-                    format_bytes(copy.0),
-                    format_bytes(copy.1),
-                    start.elapsed()
+                    addr.to_string().cyan(),
+                    format_bytes(copy.0).red(),
+                    format_bytes(copy.1).green(),
+                    format!("{:.2?}", start.elapsed()).white()
                 );
             }
             Request::Associate(_) => {
@@ -81,18 +87,20 @@ impl Handler for CommandHandler {
                     .await?;
 
                 println!(
-                    "[UDP] Association created for {}. Client should send UDP to {}.",
+                    "{} Association created for {}. Client should send UDP to {}.",
+                    "[UDP]".magenta().bold(),
                     stream.peer_addr(),
-                    bind_addr
+                    bind_addr.to_string().yellow()
                 );
 
                 let start = Instant::now();
                 udp_session_run(inbound, Duration::from_secs(180)).await?;
 
                 println!(
-                    "[UDP] Association for {} ended | Duration: {:.2?}",
+                    "{} Association for {} ended | Duration: {}",
+                    "[UDP]".magenta().bold(),
                     stream.peer_addr(),
-                    start.elapsed()
+                    format!("{:.2?}", start.elapsed()).white()
                 );
             }
             _ => {
@@ -289,7 +297,11 @@ async fn handle_client_packet(
             })
         };
 
-        println!("[UDP] New NAT entry created for target: {}", target_key);
+        println!(
+            "{} New NAT entry created for target: {}",
+            "[UDP]".magenta().bold(),
+            target_key.cyan()
+        );
         let entry = OutboundEntry {
             socket: outbound,
             last_active: Instant::now(),
