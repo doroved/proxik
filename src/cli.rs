@@ -12,9 +12,9 @@ pub struct Cli {
 pub enum Commands {
     /// Run server
     Run {
-        /// Bind address
-        #[arg(short, long, default_value = "0.0.0.0:1080")]
-        bind: String,
+        /// Listen port
+        #[arg(short, long, default_value = "1080")]
+        port: u16,
 
         /// Save proxy to configuration file
         #[arg(short, long)]
@@ -25,9 +25,9 @@ pub enum Commands {
     },
     /// Start server daemon
     Start {
-        /// Bind address
-        #[arg(short, long, default_value = "0.0.0.0:1080")]
-        bind: String,
+        /// Listen port
+        #[arg(short, long, default_value = "1080")]
+        port: u16,
 
         /// Save proxy to configuration file
         #[arg(short, long)]

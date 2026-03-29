@@ -51,7 +51,7 @@ proxik run
 To run a specific proxy (without starting others from config):
 
 ```bash
-proxik run --bind 0.0.0.0:1080 socks5
+proxik run --port 1080 socks5
 ```
 
 ### Daemon Management
@@ -64,7 +64,7 @@ proxik start
 
 # Add a new proxy to config and save it (~/.proxik/config.toml)
 # Note: This updates the config even if the daemon is already running.
-proxik start --bind 0.0.0.0:1080 --save socks5 --username admin --password hello
+proxik start --port 1080 --save socks5 --username admin --password hello
 
 # Stop the daemon
 proxik stop
@@ -82,10 +82,10 @@ proxik list
 
 Example output:
 ```text
-PROTOCOL   BIND                 STATUS     USER            PASS
----------- -------------------- ---------- --------------- ---------------
-socks5     0.0.0.0:1080         RUNNING    -               -
-socks5     0.0.0.0:1088         STOPPED    admin           hello
+PROTOCOL   BIND           STATUS    USER      PASS   URL
+---------- -------------- --------- --------- ------ ----------------------------------------
+socks5     0.0.0.0:9999   RUNNING   doroved   hello    socks5h://doroved:hello@92.123.135.139:1080
+socks5     0.0.0.0:1099   STOPPED   -       -          socks5h://92.123.135.139:1099
 ```
 
 ### Self-Update
@@ -99,7 +99,7 @@ proxik update
 ### Command Overview
 
 - `run`: Run in foreground.
-  - `-b, --bind <BIND>`: Bind address (default: `0.0.0.0:1080`).
+  - `-p, --port <PORT>`: Listen port (default: `1080`).
   - `-s, --save`: Save this proxy configuration to `~/.proxik/config.toml`.
   - `socks5`: SOCKS5 protocol subcommand.
     - `-u, --username <USER>`: Optional username for auth.

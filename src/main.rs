@@ -16,8 +16,8 @@ fn main() -> Result<()> {
     let mut config = Config::load()?;
 
     match cli.command {
-        Commands::Run { bind, save, cmd } => {
-            let proxies_to_run = get_proxies_to_run(&mut config, bind, save, cmd)?;
+        Commands::Run { port, save, cmd } => {
+            let proxies_to_run = get_proxies_to_run(&mut config, port, save, cmd)?;
             if proxies_to_run.is_empty() {
                 return Ok(());
             }
@@ -27,8 +27,9 @@ fn main() -> Result<()> {
 
             rt.block_on(run_proxies(proxies_to_run))?;
         }
-        Commands::Start { bind, save, cmd } => {
+        Commands::Start { port, save, cmd } => {
             let mut overwritten = false;
+            let bind = format!("0.0.0.0:{}", port);
 
             if let Some(run_cmd) = save.then_some(cmd).flatten() {
                 let proxy = match run_cmd {
@@ -275,10 +276,11 @@ async fn fetch_public_ip() -> Result<String> {
 
 fn get_proxies_to_run(
     config: &mut Config,
-    bind: String,
+    port: u16,
     save: bool,
     cmd: Option<RunCommands>,
 ) -> Result<Vec<ProxyConfig>> {
+    let bind = format!("0.0.0.0:{}", port);
     if let Some(run_cmd) = cmd {
         let proxy = match run_cmd {
             RunCommands::Socks5 { username, password } => ProxyConfig {
