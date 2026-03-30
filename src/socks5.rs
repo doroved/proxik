@@ -16,37 +16,67 @@ use tokio::time::{MissedTickBehavior, interval};
 
 use crate::utils::{format_bytes, resolve_ipv4};
 
+/// Compatibility entrypoint for running the SOCKS5 server
 pub async fn run(
     bind_addr: &str,
     port: u16,
     username: Option<String>,
     password: Option<String>,
 ) -> Result<()> {
-    let listener = TcpListener::bind(bind_addr).await?;
-    tracing::info!(
-        "[SOCKS5:{}] server listening on {}",
-        port,
-        listener.local_addr()?.to_string()
-    );
+    Socks5Server::new(bind_addr, port, username, password)
+        .run()
+        .await
+}
 
-    let shutdown = async {
-        tokio::signal::ctrl_c().await.unwrap();
-    };
+struct Socks5Server {
+    bind_addr: String,
+    port: u16,
+    username: Option<String>,
+    password: Option<String>,
+}
 
-    let handler = CommandHandler { port };
-
-    match (username, password) {
-        (Some(u), Some(p)) => {
-            let config = SocksConfig::new(UserPassword::new(u, p), handler);
-            Server::run(listener, config.into(), shutdown)
-                .await
-                .context("SOCKS5 server (auth) encountered a fatal error")
+impl Socks5Server {
+    pub fn new(
+        bind_addr: &str,
+        port: u16,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> Self {
+        Self {
+            bind_addr: bind_addr.to_string(),
+            port,
+            username,
+            password,
         }
-        _ => {
-            let config = SocksConfig::new(NoAuthentication, handler);
-            Server::run(listener, config.into(), shutdown)
-                .await
-                .context("SOCKS5 server (no-auth) encountered a fatal error")
+    }
+
+    pub async fn run(self) -> Result<()> {
+        let listener = TcpListener::bind(&self.bind_addr).await?;
+        tracing::info!(
+            "[SOCKS5:{}] server listening on {}",
+            self.port,
+            listener.local_addr()?.to_string()
+        );
+
+        let shutdown = async {
+            tokio::signal::ctrl_c().await.unwrap();
+        };
+
+        let handler = CommandHandler { port: self.port };
+
+        match (self.username, self.password) {
+            (Some(u), Some(p)) => {
+                let config = SocksConfig::new(UserPassword::new(u, p), handler);
+                Server::run(listener, config.into(), shutdown)
+                    .await
+                    .context("SOCKS5 server (auth) encountered a fatal error")
+            }
+            _ => {
+                let config = SocksConfig::new(NoAuthentication, handler);
+                Server::run(listener, config.into(), shutdown)
+                    .await
+                    .context("SOCKS5 server (no-auth) encountered a fatal error")
+            }
         }
     }
 }
