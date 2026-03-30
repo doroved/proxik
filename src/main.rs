@@ -13,8 +13,6 @@ use clap::Parser;
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
-        .with_ansi(true)
-        .with_ansi_sanitization(false)
         .init();
 
     let cli = cli::Cli::parse();

@@ -80,8 +80,7 @@ impl HttpServer {
         self: Arc<Self>,
         req: Request<hyper::body::Incoming>,
         client_addr: SocketAddr,
-    ) -> Result<Response<BoxBody<Bytes, std::io::Error>>, Box<dyn std::error::Error + Send + Sync>>
-    {
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, anyhow::Error> {
         if let Some(expected) = &self.auth {
             let authenticated = req
                 .headers()
@@ -161,7 +160,7 @@ impl HttpServer {
                 format!("{:.2?}", start.elapsed())
             );
 
-            Ok(resp.map(|b| BoxBody::new(b.map_err(std::io::Error::other))))
+            Ok(resp.map(|b| b.boxed()))
         }
     }
 
