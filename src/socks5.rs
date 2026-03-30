@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
 
-use crate::utils::format_bytes;
+use crate::utils::{format_bytes, resolve_ipv4};
 
 pub async fn run(
     bind_addr: &str,
@@ -74,15 +74,7 @@ impl Handler for CommandHandler {
                 let target_addr = match addr {
                     Address::Domain(ref domain, port) => {
                         let full_addr = format!("{}:{}", domain.format_as_str(), port);
-                        tokio::net::lookup_host(full_addr)
-                            .await?
-                            .find(|a| a.is_ipv4())
-                            .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::NotFound,
-                                    "No IPv4 address found for domain",
-                                )
-                            })?
+                        resolve_ipv4(&full_addr).await?
                     }
                     Address::IPv6(_) => {
                         return Err(io::Error::new(
@@ -287,12 +279,7 @@ async fn handle_client_packet(
         }
         Address::Domain(ref domain, port) => {
             let full_addr = format!("{}:{}", domain.format_as_str(), port);
-            tokio::net::lookup_host(full_addr)
-                .await?
-                .find(|a| a.is_ipv4())
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::NotFound, "No IPv4 address found for domain")
-                })?
+            resolve_ipv4(&full_addr).await?
         }
     };
 

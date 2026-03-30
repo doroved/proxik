@@ -1,3 +1,17 @@
+use std::net::SocketAddr;
+
+pub async fn resolve_ipv4(target: &str) -> std::io::Result<SocketAddr> {
+    tokio::net::lookup_host(target)
+        .await?
+        .find(|a| a.is_ipv4())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "No IPv4 address found for domain",
+            )
+        })
+}
+
 pub fn format_bytes(bytes: u64) -> String {
     const KIB: u64 = 1024;
     const MIB: u64 = KIB * 1024;

@@ -88,6 +88,11 @@ fn main() -> Result<()> {
                 daemon::stop_daemon()?;
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 daemon::start_daemon()?;
+
+                let proxies_to_run = config.proxies.clone();
+                let rt = tokio::runtime::Runtime::new()?;
+                update_public_ip(&rt, &mut config);
+                rt.block_on(run_proxies(proxies_to_run))?;
             }
         }
         Commands::Rm { port, all } => {
@@ -115,6 +120,11 @@ fn main() -> Result<()> {
                         daemon::stop_daemon()?;
                         std::thread::sleep(std::time::Duration::from_millis(500));
                         daemon::start_daemon()?;
+
+                        let proxies_to_run = config.proxies.clone();
+                        let rt = tokio::runtime::Runtime::new()?;
+                        update_public_ip(&rt, &mut config);
+                        rt.block_on(run_proxies(proxies_to_run))?;
                     }
                 } else {
                     println!("No proxy found on port {} in config.", p);

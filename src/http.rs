@@ -1,4 +1,4 @@
-use crate::utils::format_bytes;
+use crate::utils::{format_bytes, resolve_ipv4};
 use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
@@ -107,7 +107,7 @@ async fn proxy(
             .unwrap_or(req.uri().path())
             .to_string();
 
-        let stream = TcpStream::connect(&target).await?;
+        let stream = TcpStream::connect(resolve_ipv4(&target).await?).await?;
         let (mut sender, conn) =
             hyper::client::conn::http1::handshake(TokioIo::new(stream)).await?;
         tokio::spawn(async move {
@@ -137,7 +137,7 @@ async fn tunnel(
     client_addr: SocketAddr,
     proxy_port: u16,
 ) -> Result<()> {
-    let mut server = TcpStream::connect(&addr).await?;
+    let mut server = TcpStream::connect(resolve_ipv4(&addr).await?).await?;
     tracing::info!(
         "[HTTP:{}] {} → connecting to {}",
         proxy_port,
