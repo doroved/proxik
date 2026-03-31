@@ -1,3 +1,4 @@
+mod acme;
 mod app;
 mod cli;
 mod config;

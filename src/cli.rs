@@ -56,6 +56,15 @@ pub enum ProxyCommands {
         #[arg(short, long)]
         auth: Option<String>,
     },
+    /// Https server
+    Https {
+        /// Listen port
+        #[arg(short, long, default_value = "1080")]
+        port: u16,
+        /// Credentials for authentication (format: user:pass)
+        #[arg(short, long)]
+        auth: Option<String>,
+    },
     /// Socks5 server
     Socks5 {
         /// Listen port
@@ -71,6 +80,7 @@ impl ProxyCommands {
     pub fn into_config(self) -> Result<ProxyConfig> {
         let (protocol, port, auth) = match self {
             ProxyCommands::Http { port, auth } => ("http".to_string(), port, auth),
+            ProxyCommands::Https { port, auth } => ("https".to_string(), port, auth),
             ProxyCommands::Socks5 { port, auth } => ("socks5".to_string(), port, auth),
         };
 

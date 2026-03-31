@@ -32,6 +32,17 @@ impl App {
     fn add(&mut self, cmd: ProxyCommands) -> Result<()> {
         let proxy = cmd.into_config()?;
 
+        if proxy.protocol == "https" {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                tracing::info!("HTTPS proxy added. Ensuring Let's Encrypt certificate...");
+                if let Ok(manager) = crate::acme::AcmeManager::new().await
+                    && let Err(e) = manager.ensure_ip_certificate().await {
+                        tracing::error!("Failed to obtain certificate: {}", e);
+                    }
+            });
+        }
+
         match self.config.add_proxy(proxy.clone()) {
             Some(old) => {
                 println!(
@@ -350,6 +361,14 @@ impl App {
     }
 
     async fn run_proxies(proxies: Vec<ProxyConfig>) -> Result<()> {
+        if proxies.iter().any(|p| p.protocol == "https") {
+            let manager = crate::acme::AcmeManager::new().await?;
+            manager.ensure_ip_certificate().await?;
+            manager.start_background_renewal(|_| {
+                tracing::info!("Certificate renewed! HTTPS proxy will automatically reload it.");
+            });
+        }
+
         let mut handles = vec![];
         for proxy in proxies {
             let bind = format!("0.0.0.0:{}", proxy.port);
@@ -371,6 +390,17 @@ impl App {
                         if let Err(e) = http::run(&bind, port, proxy.username, proxy.password).await
                         {
                             tracing::error!("HTTP server error on {}: {}", bind, e);
+                        }
+                    });
+                    handles.push(h);
+                }
+                "https" => {
+                    let port = proxy.port;
+                    let h = tokio::spawn(async move {
+                        if let Err(e) =
+                            http::run_https(&bind, port, proxy.username, proxy.password).await
+                        {
+                            tracing::error!("HTTPS server error on {}: {}", bind, e);
                         }
                     });
                     handles.push(h);
