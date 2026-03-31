@@ -11,7 +11,7 @@ Lightweight and minimalistic HTTP, HTTPS, and SOCKS5 proxy server written in Rus
 - **Auto-Config**: Save proxies to `~/.proxik/config.toml` and manage them easily via CLI commands.
 - **Auto-Update**: Built-in self-update mechanism via GitHub Releases.
 - **Daemon Mode**: Run and manage Proxik as a background service.
-- **HTTPS & Let's Encrypt**: (Planned) Automatic certificate management for HTTPS proxies.
+- **HTTPS & Let's Encrypt**: Automatic certificate management for HTTPS proxies. Proxik will automatically obtain and renew TLS certificates via Let's Encrypt (HTTP-01 challenge) and reload them on the fly without dropping active connections.
 
 ## Installation
 
@@ -65,6 +65,10 @@ proxik add socks5 --port 1080 --auth admin:hello
 
 # Add an HTTP proxy
 proxik add http --port 8080
+
+# Add an HTTPS proxy (Automatically provisions Let's Encrypt certs!)
+# Note: Port 80 must be free for the ACME challenge when acquiring/renewing the certificate.
+proxik add https --port 443 --auth secure:pass
 
 # Remove a proxy from config by port
 proxik rm 1080
@@ -125,6 +129,8 @@ proxik update
     - `-a, --auth <user:pass>`: Optional credentials for authentication.
   - `http`: HTTP protocol.
     - `-p, --port <PORT>`: Listen port (default: `1080`).
+  - `https`: HTTPS protocol with automatic Let's Encrypt certificates.
+    - `-p, --port <PORT>`: Listen port (default: `1080`).
 - `rm <PORT>`: Remove a proxy from configuration.
   - `-a, --all`: Remove all proxies from configuration.
 - `run`: Run proxies in foreground. Without arguments, runs all from config. Can accept `socks5`/`http` to run a single proxy on the fly.
@@ -151,7 +157,19 @@ protocol = "http"
 port = 8080
 username = "admin"
 password = "password123"
+
+[[proxies]]
+protocol = "https"
+port = 443
+username = "admin"
+password = "password123"
 ```
+
+## How HTTPS works
+
+When you add or run an `https` proxy, Proxik initializes an ACME client to automatically provision a Let's Encrypt certificate for your server's public IP address.
+- **Port 80 Requirement**: Proxik temporarily spins up an HTTP server on port `80` to complete the ACME HTTP-01 challenge. Make sure this port is free and accessible from the internet, and that you have the necessary privileges (e.g., running as root/sudo) if required.
+- **Zero-Downtime Reloads**: Certificates and keys are saved to `~/.proxik/acme/`. A background task watches these files for changes. When a certificate is renewed, Proxik dynamically reloads the new TLS configuration on the fly. Active connections are not interrupted.
 
 ## License
 
