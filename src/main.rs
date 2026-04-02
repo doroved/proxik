@@ -255,15 +255,9 @@ fn main() -> Result<()> {
                     let mut res = Vec::new();
                     for proxy in config.proxies {
                         let bind = format!("0.0.0.0:{}", proxy.port);
-                        let status_raw = match tokio::time::timeout(
-                            std::time::Duration::from_millis(200),
-                            tokio::net::TcpStream::connect(&bind),
-                        )
-                        .await
-                        {
-                            Ok(Ok(_)) => "RUNNING",
-                            _ => "STOPPED",
-                        };
+                        let is_running = utils::check_process_name_on_port(proxy.port, "proxik");
+
+                        let status_raw = if is_running { "RUNNING" } else { "STOPPED" };
 
                         let status = if status_raw == "RUNNING" {
                             status_raw.green()

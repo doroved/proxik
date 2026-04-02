@@ -27,3 +27,34 @@ pub fn format_bytes(bytes: u64) -> String {
         format!("{} B", bytes)
     }
 }
+
+pub fn check_process_name_on_port(port: u16, process_name: &str) -> bool {
+    if let Ok(output) = std::process::Command::new("lsof")
+        .arg("-nP")
+        .arg(format!("-iTCP:{}", port))
+        .arg("-sTCP:LISTEN")
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout
+            .lines()
+            .skip(1)
+            .any(|line| line.starts_with(process_name))
+        {
+            return true;
+        }
+    }
+
+    if let Ok(output) = std::process::Command::new("ss")
+        .arg("-lptn")
+        .arg(format!("sport = :{}", port))
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.contains(process_name) {
+            return true;
+        }
+    }
+
+    false
+}
