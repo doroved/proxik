@@ -58,3 +58,17 @@ pub fn check_process_name_on_port(port: u16, process_name: &str) -> bool {
 
     false
 }
+
+pub fn require_root() -> anyhow::Result<()> {
+    #[cfg(unix)]
+    if std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).trim() != "0")
+    {
+        return Err(anyhow::anyhow!(
+            "This command must be run as root. Please run with sudo."
+        ));
+    }
+    Ok(())
+}

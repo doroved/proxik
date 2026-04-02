@@ -17,6 +17,8 @@ struct Asset {
 }
 
 pub async fn update() -> Result<()> {
+    crate::utils::require_root()?;
+
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");
 
@@ -81,9 +83,10 @@ pub async fn update() -> Result<()> {
     let temp_dir = std::env::temp_dir().join(format!("{}_update_dir", name));
     let archive_path = std::env::temp_dir().join(format!("{}_update.tar.gz", name));
 
-    if temp_dir.exists() {
-        fs::remove_dir_all(&temp_dir)?;
-    }
+    // Clean up any existing temp files/dirs
+    let _ = fs::remove_dir_all(&temp_dir);
+    let _ = fs::remove_file(&archive_path);
+
     fs::create_dir_all(&temp_dir)?;
 
     // Write content to temporary file
